@@ -1,0 +1,10 @@
+__pycache__
+*.bak
+*.log
+.vscode
+.idea
+ckpt
+check_logs
+*.pickle
+hostfile
+__pycache__/
