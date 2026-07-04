@@ -9,7 +9,7 @@ from torch.autograd.variable import Variable
 
 from megatron.core import parallel_state
 from megatron.core.enums import ModelType
-from megatron.core.pipeline_parallel import p2p_communication
+from megatron.core.pipeline_parallel.p2p_communication import P2PCommunicator
 from megatron.core.transformer.cuda_graphs import create_cudagraphs
 from megatron.core.transformer.moe.router import MoEAuxLossAutoScaler
 from megatron.core.transformer.multi_token_prediction import MTPLossAutoScaler
@@ -27,6 +27,72 @@ from deeplink_megatron.core.pipeline_parallel.offload import get_pipeline_offloa
 
 # Types
 Shape = Union[List[int], torch.Size]
+_P2P_COMMUNICATOR_CACHE = {}
+
+
+def _is_encoder_and_decoder_model(model_type: ModelType) -> bool:
+    encoder_and_decoder = getattr(ModelType, "encoder_and_decoder", None)
+    return encoder_and_decoder is not None and model_type == encoder_and_decoder
+
+
+def _get_p2p_communicator(config):
+    pp_group = parallel_state.get_pipeline_model_parallel_group()
+    cache_key = (id(config), id(pp_group))
+    communicator = _P2P_COMMUNICATOR_CACHE.get(cache_key)
+    if communicator is None:
+        communicator = P2PCommunicator(pp_group=pp_group, config=config)
+        _P2P_COMMUNICATOR_CACHE[cache_key] = communicator
+    return communicator
+
+
+class _P2PCommunicationCompat:
+    """Compatibility shim for older module-level p2p_communication calls."""
+
+    def recv_forward(self, tensor_shapes, config, is_first_stage):
+        return _get_p2p_communicator(config).recv_forward(tensor_shapes, is_first_stage)
+
+    def recv_backward(self, tensor_shapes, config, is_last_stage):
+        return _get_p2p_communicator(config).recv_backward(tensor_shapes, is_last_stage)
+
+    def send_forward(self, output_tensors, config, is_last_stage):
+        return _get_p2p_communicator(config).send_forward(output_tensors, is_last_stage)
+
+    def send_backward(self, input_tensor_grads, config, is_first_stage):
+        return _get_p2p_communicator(config).send_backward(input_tensor_grads, is_first_stage)
+
+    def send_forward_recv_backward(self, output_tensors, tensor_shapes, config, is_last_stage):
+        return _get_p2p_communicator(config).send_forward_recv_backward(
+            output_tensors, tensor_shapes, is_last_stage
+        )
+
+    def send_backward_recv_forward(self, input_tensor_grads, tensor_shapes, config, is_first_stage):
+        return _get_p2p_communicator(config).send_backward_recv_forward(
+            input_tensor_grads, tensor_shapes, is_first_stage
+        )
+
+    def send_forward_recv_forward(
+        self, output_tensor, *, recv_prev, tensor_shape, config, overlap_p2p_comm=False
+    ):
+        return _get_p2p_communicator(config).send_forward_recv_forward(
+            output_tensor, recv_prev, tensor_shape, overlap_p2p_comm=overlap_p2p_comm
+        )
+
+    def send_backward_recv_backward(
+        self, input_tensor_grad, *, recv_next, tensor_shape, config, overlap_p2p_comm=False
+    ):
+        return _get_p2p_communicator(config).send_backward_recv_backward(
+            input_tensor_grad, recv_next, tensor_shape, overlap_p2p_comm=overlap_p2p_comm
+        )
+
+    def send_forward_backward_recv_forward_backward(
+        self, output_tensor, input_tensor_grad, *, recv_prev, recv_next, tensor_shape, config
+    ):
+        return _get_p2p_communicator(config).send_forward_backward_recv_forward_backward(
+            output_tensor, input_tensor_grad, recv_prev, recv_next, tensor_shape
+        )
+
+
+p2p_communication = _P2PCommunicationCompat()
 
 
 def get_forward_backward_func():
@@ -356,7 +422,7 @@ def forward_step(
     # downstream as well.
     model_type = get_model_type(model)
     if (
-        model_type == ModelType.encoder_and_decoder
+        _is_encoder_and_decoder_model(model_type)
         and encoder_decoder_xattn
         and parallel_state.is_inside_decoder()
     ):
@@ -426,7 +492,7 @@ def backward_step(input_tensor, output_tensor, output_tensor_grad, model_type, c
     # model with encoder and decoder).
     if (
         parallel_state.get_pipeline_model_parallel_world_size() > 1
-        and model_type == ModelType.encoder_and_decoder
+        and _is_encoder_and_decoder_model(model_type)
         and len(output_tensor_grad) > 1  # excludes models that lack a skip connection.
     ):
         if output_tensor_grad[1] is not None:
@@ -462,6 +528,7 @@ def forward_backward_no_pipelining(
     collect_non_loss_data: bool = False,
     first_val_step: Optional[bool] = None,
     adjust_tensor_shapes_fn: Optional[Callable] = None,  # unused
+    force_all_reduce: Optional[bool] = False,
 ):
     """Run forward and backward passes with no pipeline parallelism
     (no inter-stage communication).
@@ -562,7 +629,9 @@ def forward_backward_no_pipelining(
         # Finalize model grads (perform full grad all-reduce / reduce-scatter for
         # data parallelism and layernorm all-reduce for sequence parallelism).
         config.finalize_model_grads_func(
-            [model], total_num_tokens if config.calculate_per_token_loss else None
+            [model],
+            total_num_tokens if config.calculate_per_token_loss else None,
+            force_all_reduce=force_all_reduce,
         )
 
     if config.timers is not None:
@@ -727,6 +796,7 @@ def forward_backward_pipelining_with_interleaving(
     collect_non_loss_data: bool = False,
     first_val_step: Optional[bool] = None,
     adjust_tensor_shapes_fn: Optional[Callable] = None,  # unused
+    force_all_reduce: Optional[bool] = False,
 ):
     """Run interleaved 1F1B schedule (model split into model chunks), with
     communication between pipeline stages as needed.
@@ -848,7 +918,7 @@ def forward_backward_pipelining_with_interleaving(
 
     model_type = get_model_type(model[0])
 
-    if model_type == ModelType.encoder_and_decoder:
+    if _is_encoder_and_decoder_model(model_type):
         xattn_needed = get_model_xattn(model)
         assert (
             not xattn_needed
@@ -1663,7 +1733,9 @@ def forward_backward_pipelining_with_interleaving(
         # data parallelism, layernorm all-reduce for sequence parallelism, and
         # embedding all-reduce for pipeline parallelism).
         config.finalize_model_grads_func(
-            model, total_num_tokens if config.calculate_per_token_loss else None
+            model,
+            total_num_tokens if config.calculate_per_token_loss else None,
+            force_all_reduce=force_all_reduce,
         )
 
     # Restore config.grad_sync_func and config.param_sync_func.
@@ -1702,17 +1774,17 @@ def get_tensor_shapes(
     tensor_shapes = []
 
     seq_length = seq_length // parallel_state.get_context_parallel_world_size()
-    if model_type == ModelType.encoder_and_decoder:
+    if _is_encoder_and_decoder_model(model_type):
         decoder_seq_length = decoder_seq_length // parallel_state.get_context_parallel_world_size()
 
     if config.sequence_parallel:
         seq_length = seq_length // parallel_state.get_tensor_model_parallel_world_size()
-        if model_type == ModelType.encoder_and_decoder:
+        if _is_encoder_and_decoder_model(model_type):
             decoder_seq_length = (
                 decoder_seq_length // parallel_state.get_tensor_model_parallel_world_size()
             )
 
-    if model_type == ModelType.encoder_and_decoder:
+    if _is_encoder_and_decoder_model(model_type):
         if parallel_state.is_inside_encoder(rank) and not parallel_state.is_inside_decoder(rank):
             tensor_shapes.append((seq_length, micro_batch_size, config.hidden_size))
         elif encoder_decoder_xattn:
@@ -1818,6 +1890,7 @@ def forward_backward_pipelining_without_interleaving(
     collect_non_loss_data: bool = False,
     first_val_step: Optional[bool] = None,
     adjust_tensor_shapes_fn: Optional[Callable] = None,
+    force_all_reduce: Optional[bool] = False,
 ):
     """Run non-interleaved 1F1B schedule, with communication between pipeline
     stages. Returns dictionary with losses if the last stage, empty dict otherwise."""
@@ -2124,7 +2197,9 @@ def forward_backward_pipelining_without_interleaving(
         # data parallelism, layernorm all-reduce for sequence parallelism, and
         # embedding all-reduce for pipeline parallelism).
         config.finalize_model_grads_func(
-            [model], total_num_tokens if config.calculate_per_token_loss else None
+            [model],
+            total_num_tokens if config.calculate_per_token_loss else None,
+            force_all_reduce=force_all_reduce,
         )
 
     if config.timers is not None:
