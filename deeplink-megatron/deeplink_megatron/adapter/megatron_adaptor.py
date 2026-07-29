@@ -50,13 +50,13 @@ def validate_args_wrapper(validate_args):
 
         if getattr(args, "deeplink_megatron_enable_activation_offload", False):
             if args.deeplink_megatron_offload_min_bytes < 0:
-                raise AssertionError("--deeplink_megatron-offload-min-bytes must be non-negative")
+                raise AssertionError("--deeplink-megatron-offload-min-bytes must be non-negative")
             if not 0.0 <= args.deeplink_megatron_activation_offload_ratio <= 1.0:
-                raise AssertionError("--deeplink_megatron-activation-offload-ratio must be in [0, 1]")
+                raise AssertionError("--deeplink-megatron-activation-offload-ratio must be in [0, 1]")
             if args.deeplink_megatron_per_batch_offload_size < 0:
-                raise AssertionError("--deeplink_megatron-per-batch-offload-size must be non-negative")
+                raise AssertionError("--deeplink-megatron-per-batch-offload-size must be non-negative")
             if args.deeplink_megatron_activation_offload_stages < 1:
-                raise AssertionError("--deeplink_megatron-activation-offload-stages must be >= 1")
+                raise AssertionError("--deeplink-megatron-activation-offload-stages must be >= 1")
 
         return args
 

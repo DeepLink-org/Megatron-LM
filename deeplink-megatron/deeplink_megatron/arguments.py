@@ -12,7 +12,7 @@ def add_deeplink_megatron_args(parser):
     if not _has_option(parser, "--pipeline-schedule-backend"):
         group.add_argument(
             "--pipeline-schedule-backend",
-            "--deeplink_megatron-pipeline-schedule-backend",
+            "--deeplink-megatron-pipeline-schedule-backend",
             "--schedule-method",
             dest="pipeline_schedule_backend",
             default="vanilla",
@@ -20,25 +20,25 @@ def add_deeplink_megatron_args(parser):
             help="Select Megatron vanilla scheduling or the deeplink_megatron interleaved scheduler.",
         )
 
-    if not _has_option(parser, "--deeplink_megatron-enable-activation-offload"):
+    if not _has_option(parser, "--deeplink-megatron-enable-activation-offload"):
         group.add_argument(
-            "--deeplink_megatron-enable-activation-offload",
+            "--deeplink-megatron-enable-activation-offload",
             action="store_true",
             default=False,
             help="Enable deeplink_megatron scheduler-scoped activation offload/reload hooks.",
         )
 
-    if not _has_option(parser, "--deeplink_megatron-offload-min-bytes"):
+    if not _has_option(parser, "--deeplink-megatron-offload-min-bytes"):
         group.add_argument(
-            "--deeplink_megatron-offload-min-bytes",
+            "--deeplink-megatron-offload-min-bytes",
             type=int,
             default=1024 * 1024,
             help="Minimum CUDA tensor size, in bytes, eligible for deeplink_megatron activation offload.",
         )
 
-    if not _has_option(parser, "--deeplink_megatron-offload-non-contiguous"):
+    if not _has_option(parser, "--deeplink-megatron-offload-non-contiguous"):
         group.add_argument(
-            "--deeplink_megatron-offload-non-contiguous",
+            "--deeplink-megatron-offload-non-contiguous",
             action="store_true",
             default=False,
             help=(
@@ -48,34 +48,34 @@ def add_deeplink_megatron_args(parser):
             ),
         )
 
-    if not _has_option(parser, "--deeplink_megatron-no-offload-pin-memory"):
+    if not _has_option(parser, "--deeplink-megatron-no-offload-pin-memory"):
         group.add_argument(
-            "--deeplink_megatron-no-offload-pin-memory",
+            "--deeplink-megatron-no-offload-pin-memory",
             action="store_false",
             dest="deeplink_megatron_offload_pin_memory",
             default=True,
             help="Use regular CPU memory instead of pinned memory for deeplink_megatron activation offload.",
         )
 
-    if not _has_option(parser, "--deeplink_megatron-activation-offload-ratio"):
+    if not _has_option(parser, "--deeplink-megatron-activation-offload-ratio"):
         group.add_argument(
-            "--deeplink_megatron-activation-offload-ratio",
+            "--deeplink-megatron-activation-offload-ratio",
             type=float,
             default=1.0,
             help="Fraction of eligible saved activations to offload for each scheduler microbatch.",
         )
 
-    if not _has_option(parser, "--deeplink_megatron-per-batch-offload-size"):
+    if not _has_option(parser, "--deeplink-megatron-per-batch-offload-size"):
         group.add_argument(
-            "--deeplink_megatron-per-batch-offload-size",
+            "--deeplink-megatron-per-batch-offload-size",
             type=float,
             default=0.0,
             help="Fixed per-microbatch activation offload budget in MiB; 0 uses ratio-based sizing.",
         )
 
-    if not _has_option(parser, "--deeplink_megatron-activation-offload-stages"):
+    if not _has_option(parser, "--deeplink-megatron-activation-offload-stages"):
         group.add_argument(
-            "--deeplink_megatron-activation-offload-stages",
+            "--deeplink-megatron-activation-offload-stages",
             type=int,
             default=1,
             help="Number of copy issue groups used by the deeplink_megatron offload runtime.",

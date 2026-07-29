@@ -1,10 +1,4 @@
-"""Scheduler-scoped activation offload runtime for deeplink_megatron.
-
-This module is adapted from the project-owned offload runtime. The deeplink_megatron version
-keeps the scheduler-facing offload/reload machinery and removes dependencies
-that belong outside the pipeline scheduler boundary: model activation analysis,
-precision-context patching, custom comm streams, and external memcpy kernels.
-"""
+"""Scheduler-scoped activation offload runtime for deeplink_megatron."""
 
 import contextlib
 import math
@@ -342,21 +336,6 @@ class OnloadAsync:
 
 def get_offload_nstages():
     return _offload_group_count()
-
-
-offload_ctx = None
-reload_ctx = None
-
-
-def issue_loads(stage):
-    global offload_ctx
-    global reload_ctx
-    if not _offload_enabled():
-        return
-    if reload_ctx is not None:
-        reload_ctx.issue(stage)
-    if offload_ctx is not None:
-        offload_ctx.issue(stage)
 
 
 @dataclass
